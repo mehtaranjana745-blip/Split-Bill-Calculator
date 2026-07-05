@@ -1,13 +1,13 @@
 import {
     isConnected,
-    setAllowed,
     isAllowed,
-    getPublicKey,
+    setAllowed,
+    getAddress,
     signTransaction,
     getNetworkDetails
-} from 'https://esm.sh/@stellar/freighter-api@3.1.2';
+} from '@stellar/freighter-api';
 
-import * as StellarSdk from 'https://esm.sh/stellar-sdk@12.1.0';
+import * as StellarSdk from 'stellar-sdk';
 
 // Configuration
 const HORIZON_URL = "https://horizon-testnet.stellar.org";
@@ -58,20 +58,25 @@ function setupEventListeners() {
 }
 
 async function checkWalletStatus() {
-    if (await isConnected() && await isAllowed()) {
-        try {
-            const pubKey = await getPublicKey();
-            if (pubKey) {
-                await setupWallet(pubKey);
+    const connectedReq = await isConnected();
+    if (connectedReq.isConnected) {
+        const allowedReq = await isAllowed();
+        if (allowedReq.isAllowed) {
+            try {
+                const pubKeyReq = await getAddress();
+                if (pubKeyReq.address) {
+                    await setupWallet(pubKeyReq.address);
+                }
+            } catch (e) {
+                console.error("Error checking wallet status:", e);
             }
-        } catch (e) {
-            console.error("Error checking wallet status:", e);
         }
     }
 }
 
 async function handleConnectWallet() {
-    if (!(await isConnected())) {
+    const connectedReq = await isConnected();
+    if (!connectedReq.isConnected) {
         alert("Freighter wallet not installed! Please install the Freighter extension.");
         return;
     }
@@ -81,14 +86,24 @@ async function handleConnectWallet() {
         connectBtn.textContent = "Connecting...";
         
         await setAllowed();
-        const pubKey = await getPublicKey();
-        await setupWallet(pubKey);
+        const pubKeyReq = await getAddress();
+        
+        if (pubKeyReq.error) {
+            alert("Failed to connect wallet: " + pubKeyReq.error);
+            return;
+        }
+
+        if (pubKeyReq.address) {
+            await setupWallet(pubKeyReq.address);
+        }
     } catch (e) {
         console.error("Connection rejected or failed", e);
         alert("Failed to connect wallet.");
     } finally {
-        connectBtn.disabled = false;
-        connectBtn.textContent = "Connect Wallet";
+        if (!userPublicKey) {
+            connectBtn.disabled = false;
+            connectBtn.textContent = "Connect Wallet";
+        }
     }
 }
 
@@ -96,8 +111,8 @@ async function setupWallet(pubKey) {
     userPublicKey = pubKey;
     
     // Check Network
-    const network = await getNetworkDetails();
-    if (network.network !== "TESTNET") {
+    const networkReq = await getNetworkDetails();
+    if (networkReq.network !== "TESTNET") {
         networkWarning.classList.remove('hidden');
     } else {
         networkWarning.classList.add('hidden');
@@ -285,10 +300,16 @@ async function handleSendTransaction() {
         sendBtn.textContent = "Waiting for Signature...";
         showTransactionStatus('pending', 'Pending Signature', 'Please check Freighter to sign the transaction.');
         
-        const signedTxXdr = await signTransaction(transaction.toXDR(), {
+        const signReq = await signTransaction(transaction.toXDR(), {
             network: NETWORK_PASSPHRASE,
             networkPassphrase: NETWORK_PASSPHRASE
         });
+        
+        if (signReq.error) {
+            throw new Error(signReq.error);
+        }
+
+        const signedTxXdr = signReq.signedTxXdr;
 
         // 4. Submit Transaction to Horizon
         sendBtn.textContent = "Submitting to Network...";
